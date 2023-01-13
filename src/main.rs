@@ -19,7 +19,10 @@ async fn main() {
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
-        handle_connection(stream).await;
+        // Handle multiple connections.
+        tokio::spawn(async move {
+            handle_connection(stream).await;
+        });
     }
 }
 
