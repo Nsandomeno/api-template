@@ -1,9 +1,9 @@
-use std::fmt::format;
 use std::str;
+use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-async fn handle_connection(mut stream: TcpStream) {
+async fn handle_connection(mut stream: TcpStream, balance: Arc<Mutex<f32>>) {
     // Read first 16 characters from incoming stream.
     let mut buffer = [0; 16];
     stream.read(&mut buffer).await.unwrap();
@@ -15,8 +15,8 @@ async fn handle_connection(mut stream: TcpStream) {
 
     let contents = match method_type {
         "GET" => {
-            // TODO return real balance.
-            format!("{{\"balance\": {}}}", 0.0)
+            // balance needs to be locked before using it.
+            format!("{{\"balance\": {}}}", balance.lock().unwrap())
         }
         "POST" => {
             // Take characters after 'POST /' until whitespace is detected.
@@ -25,8 +25,11 @@ async fn handle_connection(mut stream: TcpStream) {
                                     .map(|x| *x as char)
                                     .collect();
             let balance_update = input.parse::<f32>().unwrap();
-            // TODO add balance update handling.
-            format!("{{\"balance\": {}}}", balance_update)
+            // Acquire the lock on the balance and mutate the value.
+            let mut locked_balance = balance.lock().unwrap();
+            *locked_balance += balance_update;
+            
+            format!("{{\"balance\": {}}}", locked_balance)
         }
         _ => {
             panic!("Invalid HTTP Method!")
@@ -44,13 +47,17 @@ async fn handle_connection(mut stream: TcpStream) {
 
 #[tokio::main]
 async fn main() {
+    // Create starting balance
+    let balance = Arc::new(Mutex::new(0.00f32));
     let listener = TcpListener::bind("127.0.0.1:8181").await.unwrap();
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
+        // Clone the balance Arc and pass it to the handler.
+        let balance = balance.clone();
         // Handle multiple connections.
         tokio::spawn(async move {
-            handle_connection(stream).await;
+            handle_connection(stream, balance).await;
         });
     }
 }
